@@ -1,0 +1,1 @@
+// Payment JavaScript functionality
