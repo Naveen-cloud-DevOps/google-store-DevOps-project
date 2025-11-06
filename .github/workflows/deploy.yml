@@ -68,3 +68,4 @@ jobs:
             kubectl apply -f $service/service.yml
             kubectl apply -f $service/autoscaler.yml
           done
+
