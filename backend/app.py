@@ -1,16 +1,17 @@
 from flask import Flask, request, jsonify
 import pymysql
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
 
-# Database configuration
+# ---------------- DATABASE CONFIG ----------------
 db_config = {
     "host": "database-1.cjy48iyci4zm.ap-northeast-1.rds.amazonaws.com",
     "user": "admin",
     "password": "Cloud1234",
-    "database": "registrationdb"  # ✅ your DB name
+    "database": "registrationdb"
 }
 
 def get_db_connection():
@@ -22,9 +23,9 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-# ---------------- SAVE USER ----------------
-@app.route("/api/save", methods=["POST"])
-def save_user():
+# ---------------- SIGNUP ----------------
+@app.route("/api/signup", methods=["POST"])
+def signup():
     try:
         data = request.get_json()
         username = data.get("username")
@@ -37,18 +38,66 @@ def save_user():
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Check if user already exists
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        existing_user = cursor.fetchone()
+        if existing_user:
+            return jsonify({"error": "Email already registered"}), 400
+
+        # Hash password before saving
+        hashed_password = generate_password_hash(password)
+
         sql = "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)"
-        cursor.execute(sql, (username, email, password))
+        cursor.execute(sql, (username, email, hashed_password))
         conn.commit()
 
         cursor.close()
         conn.close()
 
-        return jsonify({"message": "User registered successfully"}), 200
+        return jsonify({"message": "User registered successfully"}), 201
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ---------------- GET ALL USERS ----------------
+
+# ---------------- LOGIN ----------------
+@app.route("/api/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        password = data.get("password")
+
+        if not email or not password:
+            return jsonify({"error": "Email and password are required"}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Find user by email
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if user and check_password_hash(user["password"], password):
+            return jsonify({
+                "message": "Login successful",
+                "user": {
+                    "id": user["id"],
+                    "username": user["username"],
+                    "email": user["email"]
+                }
+            }), 200
+        else:
+            return jsonify({"error": "Invalid email or password"}), 401
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ---------------- GET ALL USERS (Optional) ----------------
 @app.route("/api/users", methods=["GET"])
 def get_users():
     try:
@@ -58,7 +107,6 @@ def get_users():
         users = cursor.fetchall()
         cursor.close()
         conn.close()
-
         return jsonify(users), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
