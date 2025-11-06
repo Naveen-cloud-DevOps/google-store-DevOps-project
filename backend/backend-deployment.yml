@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
         - name: backend-container
-          image: your-dockerhub-username/backend-app:latest  # Replace with your actual image
+          image: <placeholder>
           ports:
             - containerPort: 5000
