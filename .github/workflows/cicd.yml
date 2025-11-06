@@ -11,6 +11,7 @@ env:
   SERVICES: "electronics phones computers earphones backend"
   K8S_NAMESPACE: default
   CLUSTER_NAME: abinash
+  PEM_FILE: project.pem
 
 permissions:
   contents: write  # Allow committing updated files back to the repo
@@ -32,11 +33,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3. Login to Amazon ECR
+      # 3. Setup PEM key for SSH
+      - name: 🔑 Setup PEM key
+        run: |
+          echo "${{ secrets.EKS_PEM_KEY }}" > $PEM_FILE
+          chmod 400 $PEM_FILE
+
+      # 4. Login to Amazon ECR
       - name: 📦 Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Build, tag, and push Docker images
+      # 5. Build, tag, and push Docker images
       - name: 🛠 Build, tag, and push Docker images
         run: |
           for service in $SERVICES; do
@@ -59,7 +66,7 @@ jobs:
             fi
           done
 
-      # 5. Commit updated deployment files (if any)
+      # 6. Commit updated deployment files
       - name: 🔄 Commit updated deployment files
         run: |
           git config --global user.name 'GitHub Actions'
@@ -68,37 +75,34 @@ jobs:
           git commit -m "Update image tags in deployment files" || echo "No changes to commit"
           git push || echo "Push failed, probably due to permissions"
 
-      # 6. Configure kubectl for EKS
+      # 7. Configure kubectl for EKS
       - name: ☸️ Connect to EKS cluster
         run: |
           aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION --alias github-actions
           kubectl config use-context github-actions
           kubectl get nodes
 
-      # 7. Deploy to Kubernetes
+      # 8. Optional: SSH into worker node for debugging
+      - name: 🖥 SSH to worker node (optional)
+        run: |
+          NODE_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:eks:cluster-name,Values=$CLUSTER_NAME" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          echo "Connecting to node $NODE_IP"
+          ssh -o StrictHostKeyChecking=no -i $PEM_FILE ec2-user@$NODE_IP "kubectl get pods -A"
+
+      # 9. Deploy to Kubernetes
       - name: 🚀 Deploy to Kubernetes
         run: |
-          # Apply ingress first (disable validation to avoid webhook errors)
           kubectl apply -f ingress.yml --validate=false
-
-          # Apply all services, deployments, and autoscalers
           for service in $SERVICES; do
-            if [ -f $service/service.yml ]; then
-              kubectl apply -f $service/service.yml
-            fi
-            if [ -f $service/deployment.yml ]; then
-              kubectl apply -f $service/deployment.yml
-            fi
-            if [ -f $service/autoscaler.yml ]; then
-              kubectl apply -f $service/autoscaler.yml
-            fi
+            [ -f $service/service.yml ] && kubectl apply -f $service/service.yml
+            [ -f $service/deployment.yml ] && kubectl apply -f $service/deployment.yml
+            [ -f $service/autoscaler.yml ] && kubectl apply -f $service/autoscaler.yml
           done
-
-          # Apply main frontend deployment and service
           kubectl apply -f deployment.yml
           kubectl apply -f service.yml
 
-      # 8. Verify deployment
+      # 10. Verify deployment
       - name: ✅ Verify resources
-        run: |
-          kubectl get pods,svc,ingress -n $K8S_NAMESPACE
+        run: kubectl get pods,svc,ingress -n $K8S_NAMESPACE
