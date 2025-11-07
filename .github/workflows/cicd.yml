@@ -11,7 +11,6 @@ env:
   SERVICES: "electronics phones computers earphones backend"
   K8S_NAMESPACE: default
   CLUSTER_NAME: abinash
-  EC2_USER: ec2-user
 
 permissions:
   contents: write
@@ -21,9 +20,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout repository
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Configure AWS credentials
       - name: 🔧 Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -31,58 +32,69 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 📦 Login to ECR
+      # 3. Login to Amazon ECR
+      - name: 📦 Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      # 4. Build, tag, and push Docker images
       - name: 🛠 Build, tag, and push Docker images
         run: |
           for service in $SERVICES; do
             REPO_NAME="google-store-$service"
             IMAGE_TAG="${{ github.sha }}"
+
+            # Create ECR repo if it doesn't exist
             aws ecr describe-repositories --repository-names $REPO_NAME >/dev/null 2>&1 || \
               aws ecr create-repository --repository-name $REPO_NAME
+
+            # Build Docker image
             docker build -t $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG ./$service
+
+            # Push Docker image to ECR
             docker push $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG
+
+            # Update deployment.yml with new image
             if [ -f $service/deployment.yml ]; then
               sed -i "s|image:.*|image: $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG|g" $service/deployment.yml
             fi
           done
 
+      # 5. Commit updated deployment files
       - name: 🔄 Commit updated deployment files
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
           git add */deployment.yml
-          git commit -m "Update image tags" || echo "No changes to commit"
+          git commit -m "Update image tags in deployment files" || echo "No changes to commit"
           git push || echo "Push failed (likely permissions)"
 
-      - name: 🔑 Decode EC2 PEM key
+      # 6. Configure kubectl for EKS
+      - name: ☸️ Connect to EKS cluster
         run: |
-          echo "${{ secrets.EC2_PEM_B64 }}" | base64 --decode > project.pem
-          chmod 400 project.pem
+          aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+          kubectl config use-context arn:aws:eks:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:cluster/$CLUSTER_NAME
+          kubectl get nodes
 
-      - name: 📤 Copy YAML files to EC2
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+      # 7. Deploy all YAML files
+      - name: 🚀 Apply Kubernetes manifests
         run: |
-          scp -i project.pem -o StrictHostKeyChecking=no -r */*.yml $EC2_USER@$EC2_HOST:/home/$EC2_USER/
+          # Apply ingress first with path-based routing
+          if [ -f ingress.yml ]; then
+            kubectl apply -f ingress.yml --validate=false
+          fi
 
-      - name: 🚀 Deploy on EC2
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          # Deploy all services, deployments, and autoscalers
+          for service in $SERVICES; do
+            [ -f $service/service.yml ] && kubectl apply -f $service/service.yml
+            [ -f $service/deployment.yml ] && kubectl apply -f $service/deployment.yml
+            [ -f $service/autoscaler.yml ] && kubectl apply -f $service/autoscaler.yml
+          done
+
+          # Apply frontend/main deployment and service if present
+          [ -f deployment.yml ] && kubectl apply -f deployment.yml
+          [ -f service.yml ] && kubectl apply -f service.yml
+
+      # 8. Verify resources
+      - name: ✅ Verify resources
         run: |
-          ssh -i project.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
-            set -e
-            aws eks update-kubeconfig --name abinash --region ap-northeast-1
-            if [ -f ingress.yml ]; then
-              kubectl apply -f ingress.yml --validate=false
-            fi
-            for service in electronics phones computers earphones backend; do
-              [ -f $service/service.yml ] && kubectl apply -f $service/service.yml
-              [ -f $service/deployment.yml ] && kubectl apply -f $service/deployment.yml
-              [ -f $service/autoscaler.yml ] && kubectl apply -f $service/autoscaler.yml
-            done
-            [ -f deployment.yml ] && kubectl apply -f deployment.yml
-            [ -f service.yml ] && kubectl apply -f service.yml
-            kubectl get pods,svc,ingress -n default
-          EOF
+          kubectl get pods,svc,ingress -n $K8S_NAMESPACE
