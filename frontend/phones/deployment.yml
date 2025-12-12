@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
       - name: phones
-        image: 396606070456.dkr.ecr.ap-northeast-1.amazonaws.com/shopping-site-phones:88be18fd50956ac265f3aa3d917a9f05f84e0143
+        image: 396606070456.dkr.ecr.ap-northeast-1.amazonaws.com/shopping-site-phones:cdac9d7894b938062b9da081a9683b9233f0a4c6
         ports:
         - containerPort: 80
