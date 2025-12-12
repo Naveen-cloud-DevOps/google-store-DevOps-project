@@ -88,3 +88,19 @@ kubectl create namespace google
 ``` bash
 kubectl -n argocd get secret argocd-initial-admin-secret   -o jsonpath="{.data.password}" | base64 -d
 ```
+
+------------------------------------------------------------------------
+
+# 📸 Architecture & Workflow Diagrams
+
+### Cluster Architecture
+
+``` bash
+Need to change the detils 
+```
+
+![Cluster Architecture](https://i.ibb.co/6R7ZN38f/image.png)
+
+### Workflow Diagram
+
+![Workflow Diagram](https://i.ibb.co/t9WR8c8/drawing.png)
