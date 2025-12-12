@@ -1,61 +1,64 @@
-# =========================================================================
-# 📋 COPY CODE: All-in-One Setup Script
-# =========================================================================
-
 #!/bin/bash
 
-# --- 1. Kubernetes and EKS Prerequisites ---
+# --- 1. EKSCTL AND KUBECTL INSTALLATION ---
 
-echo "--- 1.1 Installing eksctl ---"
+echo "--- 1. Installing eksctl and kubectl ---"
+
+# Install eksctl
 curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | \
 [cite_start]tar xz -C /tmp [cite: 1]
 sudo mv /tmp/eksctl /usr/local/bin
 eksctl version
 
-echo "--- 1.2 Installing kubectl ---"
+# Install kubectl
 curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
 chmod +x ./kubectl
 sudo mv ./kubectl /usr/local/bin/kubectl
 
-# --- 2. System Tools Installation (Docker and Git) ---
+# --- 2. SYSTEM TOOLS INSTALLATION (Docker and Git) ---
 
 echo "--- 2. Installing Docker and Git ---"
+
 yum install docker -y
 systemctl start docker 
 yum install git -y
 
-# --- 3. EKS Cluster Creation ---
+# --- 3. EKS CLUSTER CREATION ---
 
-echo "--- 3. Creating EKS Cluster named 'google' (This may take 15-20 minutes) ---"
+echo "--- 3. Creating EKS Cluster named 'google' ---"
+
 eksctl create cluster --name google \
    --region ap-northeast-1 \
    --node-type c7i-flex.large \
    --nodes-min 2 \
    --nodes-max 2
 
-# --- 4. Kubernetes Ingress Setup ---
+# --- 4. KUBERNETES INGRESS SETUP ---
 
-echo "--- 4. Installing NGINX Ingress Controller ---"
+echo "--- 4. Installing Ingress Controller ---"
+
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
 
-echo "--- 4.1 Verifying Ingress Deployment ---"
+echo "--- 4.1 Verifying Ingress ---"
 kubectl get pods -n ingress-nginx
 kubectl get svc -n ingress-nginx
 kubectl get ingress -n google
 
-# --- 5. Database Setup (MariaDB) ---
+# --- 5. MARIADB INSTALLATION ---
 
-echo "--- 5.1 Installing MariaDB 10.5 ---"
+echo "--- 5. Installing MariaDB 10.5 ---"
+
 sudo yum update -y
 sudo dnf install -y mariadb105
 
-# Note: Running SQL non-interactively. Assumes MariaDB is running and accessible (e.g., as root).
-echo "--- 5.2 Creating Database and Users Table in MariaDB ---"
-mysql -e "
-CREATE DATABASE IF NOT EXISTS cloud;
+# Note: The database creation commands (SQL) require interactive shell access to MariaDB.
+# These cannot be easily run in a single script block without piping or expecting a password.
+# They are listed here for reference.
+echo ""
+echo "!!! Manual Step Required: Run SQL commands in MariaDB client !!!"
+echo "CREATE DATABASE IF NOT EXISTS cloud;
 [cite_start]USE cloud; [cite: 3]
 DROP TABLE IF EXISTS users;
-
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,
@@ -65,25 +68,30 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-[cite_start]" # The 'exit' command is not needed when using 'mysql -e' [cite: 4]
+[cite_start]exit [cite: 4]"
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo ""
 
-# --- 6. ArgoCD Installation and Configuration ---
+# --- 6. ARGOCD INSTALLATION AND CONFIGURATION ---
 
-echo "--- 6.1 Installing ArgoCD ---"
+echo "--- 6. Installing ArgoCD ---"
+
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
-echo "--- 6.2 Exposing ArgoCD Server via LoadBalancer ---"
+# Expose ArgoCD Server
 kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
 kubectl get svc -n argocd
 
-echo "--- 6.3 Creating Custom Namespace 'google' ---"
+# Create custom namespace
+echo "--- 6.1 Creating custom namespace 'google' ---"
 kubectl create namespace google
 
-echo "--- 6.4 Retrieving ArgoCD initial admin password ---"
+# Retrieve ArgoCD initial admin password
+echo "--- 6.2 Retrieving ArgoCD initial admin password ---"
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" |
 [cite_start]base64 -d [cite: 5]
 
 echo ""
-echo "--- Script Execution Complete! ---"
+echo "--- Installation Script Complete ---"
